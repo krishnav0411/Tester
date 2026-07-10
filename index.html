@@ -677,6 +677,61 @@ function saveAllKeys(){
   updateAllKeyDots();updateKeyCounts();logRotation('Keys saved','ok');
 }
 
+function getSaveAllKeyBindings(){
+  const bindings=[],src=saveAllKeys.toString();
+  const re=/localStorage\.setItem\(\s*['"]([^'"]+)['"]\s*,\s*\$\(\s*['"]([^'"]+)['"]\s*\)\.value\s*\)/g;
+  let m;
+  while((m=re.exec(src))!==null)bindings.push({storageKey:m[1],inputId:m[2],providerId:KEY_MAP[m[2]]||null});
+  return bindings;
+}
+
+async function loadKeysFromFile(){
+  let res;
+  try{
+    res=await fetch("./keys.json?t=" + Date.now());
+  }catch(e){
+    console.info('[keys.json] Automatic key sync skipped:',e?.message||e);
+    return;
+  }
+  if(!res.ok){
+    if(res.status===404)console.info('[keys.json] Not found; automatic key sync skipped.');
+    else console.info(`[keys.json] Automatic key sync skipped: HTTP ${res.status}.`);
+    return;
+  }
+  let data;
+  try{
+    data=await res.json();
+  }catch(e){
+    console.warn('[keys.json] Invalid JSON; automatic key sync skipped.',e);
+    return;
+  }
+  if(!data||typeof data!=='object'||Array.isArray(data)){
+    console.warn('[keys.json] Expected a JSON object; automatic key sync skipped.');
+    return;
+  }
+  const bindings=getSaveAllKeyBindings();
+  let loaded=0;
+  bindings.forEach(({providerId,inputId})=>{
+    if(!providerId||!Object.prototype.hasOwnProperty.call(data,providerId))return;
+    const raw=data[providerId];
+    if(typeof raw!=='string'||!raw.trim())return;
+    const input=$(inputId);
+    if(!input){console.warn(`[keys.json] Missing input for ${providerId}; skipped.`);return;}
+    input.value=raw.trim();loaded++;
+  });
+  const systemBinding=bindings.find(b=>b.storageKey==='sys_prompt');
+  if(systemBinding&&Object.prototype.hasOwnProperty.call(data,'systemPrompt')){
+    const raw=data.systemPrompt;
+    if(typeof raw==='string'&&raw.trim()){
+      const input=$(systemBinding.inputId);
+      if(input){input.value=raw;loaded++;}
+      else console.warn('[keys.json] Missing system prompt input; skipped.');
+    }
+  }
+  saveAllKeys();
+  console.info(`[keys.json] Automatic key sync complete. ${loaded} field${loaded!==1?'s':''} populated.`);
+}
+
 function updateAllKeyDots(){
   const freeIds=['ORFree','GitHub','Groq','Cerebras','Gemini','Mistral','Cohere','Cloudflare','Nvidia','DeepSeek'];
   const paidIds=['ORPaid','Zai','Anthropic','OpenAI','SambaNova'];
@@ -778,6 +833,7 @@ function selectModel(id,close=true){
 
 function init(){
   loadAllKeys();
+  loadKeysFromFile();
   const sb = $('sidebar');
   // Only apply desktop collapsed state on desktop; mobile uses .open
   if(window.innerWidth > 700 && localStorage.getItem('sidebar_collapsed') === 'true'){
